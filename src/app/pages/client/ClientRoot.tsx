@@ -19,6 +19,7 @@ import React, { MouseEventHandler, ReactNode, useCallback, useEffect, useState }
 import {
   clearCacheAndReload,
   clearLoginData,
+  handleSessionLoggedOut,
   initClient,
   logoutClient,
   startClient,
@@ -34,7 +35,7 @@ import { useSyncState } from '../../hooks/useSyncState';
 import { stopPropagation } from '../../utils/keyboard';
 import { SyncStatus } from './SyncStatus';
 import { AuthMetadataProvider } from '../../hooks/useAuthMetadata';
-import { getFallbackSession } from '../../state/sessions';
+import { getActiveSession } from '../../state/sessions';
 import { AutoDiscovery } from './AutoDiscovery';
 
 function ClientRootLoading() {
@@ -126,10 +127,7 @@ function ClientRootOptions({ mx }: { mx?: MatrixClient }) {
 const useLogoutListener = (mx?: MatrixClient) => {
   useEffect(() => {
     const handleLogout: HttpApiEventHandlerMap[HttpApiEvent.SessionLoggedOut] = async () => {
-      mx?.stopClient();
-      await mx?.clearStores();
-      window.localStorage.clear();
-      window.location.reload();
+      if (mx) await handleSessionLoggedOut(mx);
     };
 
     mx?.on(HttpApiEvent.SessionLoggedOut, handleLogout);
@@ -144,11 +142,11 @@ type ClientRootProps = {
 };
 export function ClientRoot({ children }: ClientRootProps) {
   const [loading, setLoading] = useState(true);
-  const { baseUrl, userId } = getFallbackSession() ?? {};
+  const { baseUrl, userId } = getActiveSession() ?? {};
 
   const [loadState, loadMatrix] = useAsyncCallback<MatrixClient, Error, []>(
     useCallback(() => {
-      const session = getFallbackSession();
+      const session = getActiveSession();
       if (!session) {
         throw new Error('No session Found!');
       }

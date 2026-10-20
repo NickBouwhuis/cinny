@@ -1,10 +1,3 @@
-// import { atom } from 'jotai';
-// import {
-//   atomWithLocalStorage,
-//   getLocalStorageItem,
-//   setLocalStorageItem,
-// } from './utils/atomWithLocalStorage';
-
 export type Session = {
   baseUrl: string;
   userId: string;
@@ -19,15 +12,17 @@ export type Sessions = Session[];
 export type SessionStoreName = {
   sync: string;
   crypto: string;
+  /** Rust crypto IndexedDB prefix. undefined means sdk default. */
+  rustCryptoPrefix?: string;
 };
 
 /**
  * Migration code for old session
  */
-// const FALLBACK_STORE_NAME: SessionStoreName = {
-//   sync: 'web-sync-store',
-//   crypto: 'crypto-store',
-// } as const;
+const FALLBACK_STORE_NAME: SessionStoreName = {
+  sync: 'web-sync-store',
+  crypto: 'crypto-store',
+} as const;
 
 export function setFallbackSession(
   accessToken: string,
@@ -70,71 +65,107 @@ export const getFallbackSession = (): Session | undefined => {
  * End of migration code for old session
  */
 
-// export const getSessionStoreName = (session: Session): SessionStoreName => {
-//   if (session.fallbackSdkStores) {
-//     return FALLBACK_STORE_NAME;
-//   }
+export const getSessionStoreName = (session: Session): SessionStoreName => {
+  if (session.fallbackSdkStores) {
+    return FALLBACK_STORE_NAME;
+  }
 
-//   return {
-//     sync: `sync${session.userId}`,
-//     crypto: `crypto${session.userId}`,
-//   };
-// };
+  return {
+    sync: `sync${session.userId}`,
+    crypto: `crypto${session.userId}`,
+    rustCryptoPrefix: `rust-crypto${session.userId}`,
+  };
+};
 
-// export const MATRIX_SESSIONS_KEY = 'matrixSessions';
-// const baseSessionsAtom = atomWithLocalStorage<Sessions>(
-//   MATRIX_SESSIONS_KEY,
-//   (key) => {
-//     const defaultSessions: Sessions = [];
-//     const sessions = getLocalStorageItem(key, defaultSessions);
+export const MATRIX_SESSIONS_KEY = 'matrixSessions';
+export const ACTIVE_SESSION_KEY = 'matrixActiveSession';
+const ADD_ACCOUNT_KEY = 'cinny_add_account';
 
-//     // Before multi account support session was stored
-//     // as multiple item in local storage.
-//     // So we need these migration code.
-//     const fallbackSession = getFallbackSession();
-//     if (fallbackSession) {
-//       removeFallbackSession();
-//       sessions.push(fallbackSession);
-//       setLocalStorageItem(key, sessions);
-//     }
-//     return sessions;
-//   },
-//   (key, value) => {
-//     setLocalStorageItem(key, value);
-//   }
-// );
+const readSessions = (): Sessions => {
+  try {
+    const item = localStorage.getItem(MATRIX_SESSIONS_KEY);
+    const sessions = item ? JSON.parse(item) : [];
+    return Array.isArray(sessions) ? sessions : [];
+  } catch {
+    return [];
+  }
+};
 
-// export type SessionsAction =
-//   | {
-//       type: 'PUT';
-//       session: Session;
-//     }
-//   | {
-//       type: 'DELETE';
-//       session: Session;
-//     };
+const writeSessions = (sessions: Sessions) => {
+  localStorage.setItem(MATRIX_SESSIONS_KEY, JSON.stringify(sessions));
+};
 
-// export const sessionsAtom = atom<Sessions, [SessionsAction], undefined>(
-//   (get) => get(baseSessionsAtom),
-//   (get, set, action) => {
-//     if (action.type === 'PUT') {
-//       const sessions = [...get(baseSessionsAtom)];
-//       const sessionIndex = sessions.findIndex(
-//         (session) => session.userId === action.session.userId
-//       );
-//       if (sessionIndex === -1) {
-//         sessions.push(action.session);
-//       } else {
-//         sessions.splice(sessionIndex, 1, action.session);
-//       }
-//       set(baseSessionsAtom, sessions);
-//       return;
-//     }
-//     if (action.type === 'DELETE') {
-//       const sessions = get(baseSessionsAtom).filter(
-//         (session) => session.userId !== action.session.userId
-//       );
-//       set(baseSessionsAtom, sessions);
-//     }
-//   }
-// );
+export const getSessions = (): Sessions => {
+  const sessions = readSessions();
+
+  // Before multi account support session was stored
+  // as multiple item in local storage.
+  // So we need these migration code.
+  const fallbackSession = getFallbackSession();
+  if (fallbackSession) {
+    removeFallbackSession();
+    if (!sessions.find((s) => s.userId === fallbackSession.userId)) {
+      sessions.push(fallbackSession);
+      writeSessions(sessions);
+    }
+    if (!localStorage.getItem(ACTIVE_SESSION_KEY)) {
+      localStorage.setItem(ACTIVE_SESSION_KEY, fallbackSession.userId);
+    }
+  }
+
+  return sessions;
+};
+
+export const getSession = (userId: string): Session | undefined =>
+  getSessions().find((s) => s.userId === userId);
+
+export const getActiveSession = (): Session | undefined => {
+  const sessions = getSessions();
+  const activeUserId = localStorage.getItem(ACTIVE_SESSION_KEY);
+  return sessions.find((s) => s.userId === activeUserId) ?? sessions[0];
+};
+
+export const setActiveSession = (userId: string) => {
+  localStorage.setItem(ACTIVE_SESSION_KEY, userId);
+};
+
+/**
+ * Add or replace the session (by userId) and make it active.
+ */
+export const putSession = (session: Session) => {
+  const sessions = getSessions();
+  const index = sessions.findIndex((s) => s.userId === session.userId);
+  if (index === -1) {
+    sessions.push(session);
+  } else {
+    sessions.splice(index, 1, session);
+  }
+  writeSessions(sessions);
+  setActiveSession(session.userId);
+};
+
+/**
+ * Remove session and return the next session to activate, if any.
+ */
+export const removeSession = (userId: string): Session | undefined => {
+  const sessions = getSessions().filter((s) => s.userId !== userId);
+  writeSessions(sessions);
+
+  const next = sessions[0];
+  if (next) {
+    setActiveSession(next.userId);
+  } else {
+    localStorage.removeItem(ACTIVE_SESSION_KEY);
+  }
+  return next;
+};
+
+/**
+ * Add-account mode lets an already logged in user visit auth pages.
+ * Stored in sessionStorage so it survives SSO redirects in the same tab.
+ */
+export const setAddingAccount = (adding: boolean) => {
+  if (adding) sessionStorage.setItem(ADD_ACCOUNT_KEY, 'true');
+  else sessionStorage.removeItem(ADD_ACCOUNT_KEY);
+};
+export const isAddingAccount = (): boolean => sessionStorage.getItem(ADD_ACCOUNT_KEY) === 'true';

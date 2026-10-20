@@ -14,9 +14,16 @@ import {
   deleteAfterLoginRedirectPath,
   getAfterLoginRedirectPath,
 } from '../../afterLoginRedirectPath';
-import { getHomePath, getLoginPath, withSearchParam } from '../../pathUtils';
+import {
+  getHomePath,
+  getLoginPath,
+  getOriginBaseUrl,
+  withOriginBaseUrl,
+  withSearchParam,
+} from '../../pathUtils';
 import { getMxIdLocalPart, getMxIdServer } from '../../../utils/matrix';
-import { setFallbackSession } from '../../../state/sessions';
+import { activateNewSession } from '../../../../client/initMatrix';
+import { useClientConfig } from '../../../hooks/useClientConfig';
 
 export enum RegisterError {
   UserTaken = 'UserTaken',
@@ -109,6 +116,7 @@ export const register = async (
 
 export const useRegisterComplete = (data?: CustomRegisterResponse) => {
   const navigate = useNavigate();
+  const { hashRouter } = useClientConfig();
 
   useEffect(() => {
     if (data) {
@@ -119,10 +127,16 @@ export const useRegisterComplete = (data?: CustomRegisterResponse) => {
       const deviceId = response.device_id;
 
       if (accessToken && deviceId) {
-        setFallbackSession(accessToken, deviceId, userId, baseUrl);
-        const afterLoginRedirectPath = getAfterLoginRedirectPath();
-        deleteAfterLoginRedirectPath();
-        navigate(afterLoginRedirectPath ?? getHomePath(), { replace: true });
+        activateNewSession({ accessToken, deviceId, userId, baseUrl }).then((needsReload) => {
+          const afterLoginRedirectPath = getAfterLoginRedirectPath();
+          deleteAfterLoginRedirectPath();
+          const path = afterLoginRedirectPath ?? getHomePath();
+          if (needsReload) {
+            window.location.replace(withOriginBaseUrl(getOriginBaseUrl(hashRouter), path));
+            return;
+          }
+          navigate(path, { replace: true });
+        });
       } else {
         const username = getMxIdLocalPart(userId);
         const userServer = getMxIdServer(userId);
@@ -134,5 +148,5 @@ export const useRegisterComplete = (data?: CustomRegisterResponse) => {
         );
       }
     }
-  }, [data, navigate]);
+  }, [data, navigate, hashRouter]);
 };

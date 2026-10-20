@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect } from 'react';
-import { Box, Header, Scroll, Spinner, Text, color } from 'folds';
+import { Box, Button, Header, Scroll, Spinner, Text, color } from 'folds';
 import {
   Outlet,
   generatePath,
@@ -30,6 +30,8 @@ import { AuthFlowsLoader } from '../../components/AuthFlowsLoader';
 import { AuthFlowsProvider } from '../../hooks/useAuthFlows';
 import { AuthServerProvider } from '../../hooks/useAuthServer';
 import { tryDecodeURIComponent } from '../../utils/dom';
+import { getActiveSession, isAddingAccount, setAddingAccount } from '../../state/sessions';
+import { getHomePath } from '../pathUtils';
 
 const currentAuthPath = (pathname: string): string => {
   if (matchPath(LOGIN_PATH, pathname)) {
@@ -119,6 +121,12 @@ export function AuthLayout() {
     [navigate, location, discoveryState, server, discoverServer]
   );
 
+  const addingAccount = isAddingAccount() && !!getActiveSession();
+  const cancelAddAccount = () => {
+    setAddingAccount(false);
+    navigate(getHomePath(), { replace: true });
+  };
+
   const [autoDiscoveryError, autoDiscoveryInfo] =
     discoveryState.status === AsyncStatus.Success ? discoveryState.data.response : [];
 
@@ -137,6 +145,11 @@ export function AuthLayout() {
               <img className={css.AuthLogo} src={CinnySVG} alt="Cinny Logo" />
               <Text size="H3">Cinny</Text>
             </Box>
+            {addingAccount && (
+              <Button size="300" variant="Secondary" fill="Soft" onClick={cancelAddAccount}>
+                <Text size="B300">Cancel</Text>
+              </Button>
+            )}
           </Header>
           <Box className={css.AuthCardContent} direction="Column">
             <Box direction="Column" gap="100">

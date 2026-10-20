@@ -2,15 +2,15 @@ import to from 'await-to-js';
 import { LoginRequest, LoginResponse, MatrixError, createClient } from 'matrix-js-sdk';
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ClientConfig, clientAllowedServer } from '../../../hooks/useClientConfig';
+import { ClientConfig, clientAllowedServer, useClientConfig } from '../../../hooks/useClientConfig';
 import { autoDiscovery, specVersions } from '../../../cs-api';
 import { ErrorCode } from '../../../cs-errorcode';
 import {
   deleteAfterLoginRedirectPath,
   getAfterLoginRedirectPath,
 } from '../../afterLoginRedirectPath';
-import { getHomePath } from '../../pathUtils';
-import { setFallbackSession } from '../../../state/sessions';
+import { getHomePath, getOriginBaseUrl, withOriginBaseUrl } from '../../pathUtils';
+import { activateNewSession } from '../../../../client/initMatrix';
 
 export enum GetBaseUrlError {
   NotAllow = 'NotAllow',
@@ -110,14 +110,26 @@ export const login = async (
 
 export const useLoginComplete = (data?: CustomLoginResponse) => {
   const navigate = useNavigate();
+  const { hashRouter } = useClientConfig();
 
   useEffect(() => {
     if (data) {
       const { response: loginRes, baseUrl: loginBaseUrl } = data;
-      setFallbackSession(loginRes.access_token, loginRes.device_id, loginRes.user_id, loginBaseUrl);
-      const afterLoginRedirectUrl = getAfterLoginRedirectPath();
-      deleteAfterLoginRedirectPath();
-      navigate(afterLoginRedirectUrl ?? getHomePath(), { replace: true });
+      activateNewSession({
+        accessToken: loginRes.access_token,
+        deviceId: loginRes.device_id,
+        userId: loginRes.user_id,
+        baseUrl: loginBaseUrl,
+      }).then((needsReload) => {
+        const afterLoginRedirectUrl = getAfterLoginRedirectPath();
+        deleteAfterLoginRedirectPath();
+        const path = afterLoginRedirectUrl ?? getHomePath();
+        if (needsReload) {
+          window.location.replace(withOriginBaseUrl(getOriginBaseUrl(hashRouter), path));
+          return;
+        }
+        navigate(path, { replace: true });
+      });
     }
-  }, [data, navigate]);
+  }, [data, navigate, hashRouter]);
 };
